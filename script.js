@@ -1,26 +1,136 @@
-// State untuk melacak komponen yang sudah ditempatkan
+/**
+ * ElectroLab - Simulasi Daya (Watt)
+ * Support: Desktop Drag & Drop & Mobile Touch Drag
+ */
+
+// 1. State & Global Variables
 let state = { 
   resistor: false, 
   led: false,
-  battery: true // Baterai sudah terpasang tetap
+  battery: true 
 };
 
-// Elemen DOM utama
+let touchType = null;
+let touchSourceId = null;
+let ghostElement = null;
+
+// Elemen DOM
 const draggables = document.querySelectorAll('.draggable');
 const dropZones = document.querySelectorAll('.drop-zone');
 const btnGenerate = document.getElementById('btn-generate');
 const circuitStatus = document.getElementById('circuit-status');
 const statusDot = circuitStatus.querySelector('.status-dot');
 const statusText = circuitStatus.querySelector('.status-text');
-
-// Elemen input (SLIDER DIHAPUS)
 const vInput = document.getElementById('v-input');
 const rInput = document.getElementById('r-input');
-
-// Elemen display
 const pDisplay = document.getElementById('p-display');
 
-// Update status sirkuit
+// 2. Fungsi Utama Penempatan (Desktop & Mobile)
+function handlePlacement(zone, type, sourceId) {
+  if (type === zone.dataset.type && !zone.classList.contains('filled')) {
+    const sourceElement = document.getElementById(sourceId);
+    const clone = sourceElement.querySelector('svg').cloneNode(true);
+    
+    zone.innerHTML = "";
+    zone.appendChild(clone);
+    zone.classList.add('filled');
+    
+    state[type] = true;
+    updateCircuitStatus();
+    resetDisplay();
+    
+    if (window.navigator.vibrate) window.navigator.vibrate(50);
+    return true;
+  }
+  return false;
+}
+
+// 3. Event Desktop (Mouse)
+draggables.forEach(item => {
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('type', item.dataset.type);
+    e.dataTransfer.setData('sourceId', item.id);
+    item.style.opacity = '0.4';
+  });
+  
+  item.addEventListener('dragend', () => item.style.opacity = '1');
+});
+
+dropZones.forEach(zone => {
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.style.borderColor = '#00BCD4';
+    zone.style.transform = 'scale(1.05)';
+  });
+  
+  zone.addEventListener('dragleave', () => {
+    zone.style.borderColor = '#bbb';
+    zone.style.transform = 'scale(1)';
+  });
+  
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.style.borderColor = '#bbb';
+    zone.style.transform = 'scale(1)';
+    const type = e.dataTransfer.getData('type');
+    const sourceId = e.dataTransfer.getData('sourceId');
+    handlePlacement(zone, type, sourceId);
+  });
+});
+
+// 4. Event Touch (Mobile Support)
+draggables.forEach(item => {
+  item.addEventListener('touchstart', (e) => {
+    const touch = e.touches[0];
+    touchType = item.dataset.type;
+    touchSourceId = item.id;
+    
+    // Buat bayangan komponen
+    ghostElement = item.querySelector('svg').cloneNode(true);
+    ghostElement.style.position = 'fixed';
+    ghostElement.style.width = '60px';
+    ghostElement.style.height = '60px';
+    ghostElement.style.opacity = '0.7';
+    ghostElement.style.pointerEvents = 'none';
+    ghostElement.style.zIndex = '1000';
+    ghostElement.style.left = touch.clientX - 30 + 'px';
+    ghostElement.style.top = touch.clientY - 30 + 'px';
+    document.body.appendChild(ghostElement);
+    
+    item.style.opacity = '0.4';
+  }, { passive: false });
+
+  item.addEventListener('touchmove', (e) => {
+    if (!ghostElement) return;
+    const touch = e.touches[0];
+    ghostElement.style.left = touch.clientX - 30 + 'px';
+    ghostElement.style.top = touch.clientY - 30 + 'px';
+    e.preventDefault(); 
+  }, { passive: false });
+
+  item.addEventListener('touchend', (e) => {
+    if (!ghostElement) return;
+    const touch = e.changedTouches[0];
+    
+    dropZones.forEach(zone => {
+      const rect = zone.getBoundingClientRect();
+      if (
+        touch.clientX >= rect.left && touch.clientX <= rect.right &&
+        touch.clientY >= rect.top && touch.clientY <= rect.bottom
+      ) {
+        handlePlacement(zone, touchType, touchSourceId);
+      }
+    });
+
+    ghostElement.remove();
+    ghostElement = null;
+    item.style.opacity = '1';
+    touchType = null;
+    touchSourceId = null;
+  });
+});
+
+// 5. Fungsi UI & Status
 function updateCircuitStatus() {
   const componentsNeeded = Object.keys(state).filter(key => key !== 'battery' && !state[key]);
   
@@ -41,199 +151,74 @@ function updateCircuitStatus() {
   }
 }
 
-// Reset LED ke kondisi awal
 function resetLED() {
   const ledSlot = document.querySelector('#slot-led');
   if (!ledSlot) return;
-  
   const ledBulb = ledSlot.querySelector('.led-bulb');
   if (ledBulb) {
     ledBulb.setAttribute('fill', '#FFFFFF');
-    ledBulb.style.opacity = '1';
     ledBulb.style.animation = 'none';
-    ledBulb.style.transition = 'none';
-    
-    // Hapus filter SVG jika ada
-    const svgElement = ledSlot.querySelector('svg');
-    if (svgElement) {
-      const defs = svgElement.querySelector('defs');
-      if (defs) {
-        const filter = defs.querySelector('filter');
-        if (filter) filter.remove();
-      }
-      ledBulb.removeAttribute('filter');
-    }
   }
 }
 
-// Reset tampilan hasil
 function resetDisplay() {
-  iDisplay.textContent = '0.00';
+  if (pDisplay) pDisplay.textContent = '0.00';
   resetLED();
 }
 
-// Update warna LED berdasarkan arus (VERSI DIPERBAIKI - tanpa error)
 function updateLEDColor(I_mA) {
   const ledSlot = document.querySelector('#slot-led');
   if (!ledSlot) return;
-  
   const ledBulb = ledSlot.querySelector('.led-bulb');
   if (!ledBulb) return;
   
   let color = "#ffffff";
-  
-  if (I_mA > 0 && I_mA < 50) {
-    color = "#fffc5f"; // Kuning sangat redup
-  } else if (I_mA >= 50 && I_mA < 150) {
-    color = "#fc9653"; // Kuning
-  } else if (I_mA >= 150 && I_mA <= 200) {
-    color = "#ff3c01"; // Oranye terang
-  } else if (I_mA > 200) {
-    color = "#ff0000"; // Hitam (burnout)
-    // LED berkedip jika arus terlalu tinggi
+  if (I_mA > 0 && I_mA < 50) color = "#fffc5f";
+  else if (I_mA >= 50 && I_mA < 150) color = "#fc9653";
+  else if (I_mA >= 150 && I_mA <= 200) color = "#ff3c01";
+  else if (I_mA > 200) {
+    color = "#ff0000"; 
     ledBulb.style.animation = 'blink 0.5s infinite alternate';
-  } else {
-    ledBulb.style.animation = 'none';
   }
   
-  // Terapkan perubahan warna fill
   ledBulb.setAttribute('fill', color);
   ledBulb.style.transition = "fill 0.5s ease";
 }
 
-// Fungsi untuk menghitung dan menampilkan hasil (HANYA saat tombol ditekan)
+// 6. Logika Perhitungan (Daya P = V^2 / R)
 function calculateAndDisplay() {
-  // Validasi: cek apakah sirkuit lengkap
-  if (!state.resistor || !state.led) {
-    // Tidak ada notifikasi
-    return;
-  }
+  if (!state.resistor || !state.led) return;
 
   const V = parseFloat(vInput.value);
   const R = parseFloat(rInput.value);
   
-  // Validasi input
-  if (isNaN(V) || V <= 0) {
-    // Tidak ada notifikasi
-    return;
-  }
-  
-  if (isNaN(R) || R <= 0) {
-    // Tidak ada notifikasi
-    return;
-  }
-// 1. Hitung Arus dulu (I = V / R)
+  if (isNaN(V) || V <= 0 || isNaN(R) || R <= 0) return;
+
   const I = V / R;
-  
-  // 2. Hitung Daya (P = V * I) atau (P = V^2 / R)
   const P_Watt = V * I;
   
-  // 3. Update tampilan Daya
-  pDisplay.textContent = P_Watt.toFixed(2);
+  if (pDisplay) pDisplay.textContent = P_Watt.toFixed(2);
   
-  // 4. Update visual LED berdasarkan Daya (misal: LED panas jika daya > 2W)
   const I_mA = I * 1000;
   updateLEDColor(I_mA);
 }
 
-// Event listener untuk input number (TANPA SYNC SLIDER)
+// 7. Event Listeners
 [vInput, rInput].forEach(input => {
   input.addEventListener('input', function() {
-    const value = parseFloat(this.value);
-    const min = parseFloat(this.min);
-    const max = parseFloat(this.max);
-    
-    // Validasi range
-    if (value < min) this.value = min;
-    if (value > max) this.value = max;
-    
-    // Reset tampilan saat nilai diubah (karena simulasi belum dijalankan)
+    if (this.value < parseFloat(this.min)) this.value = this.min;
+    if (this.value > parseFloat(this.max)) this.value = this.max;
     resetDisplay();
   });
 });
 
-// Drag & Drop functionality
-draggables.forEach(item => {
-  item.addEventListener('dragstart', (e) => {
-    e.dataTransfer.setData('type', item.dataset.type);
-    e.dataTransfer.setData('sourceId', item.id);
-    item.style.opacity = '0.4';
-  });
-  
-  item.addEventListener('dragend', (e) => {
-    item.style.opacity = '1';
-  });
-});
-
-dropZones.forEach(zone => {
-  zone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    zone.style.borderColor = '#00BCD4';
-    zone.style.transform = 'scale(1.05)';
-  });
-  
-  zone.addEventListener('dragleave', (e) => {
-    zone.style.borderColor = '#bbb';
-    zone.style.transform = 'scale(1)';
-  });
-  
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.style.borderColor = '#bbb';
-    zone.style.transform = 'scale(1)';
-    
-    const type = e.dataTransfer.getData('type');
-    const sourceId = e.dataTransfer.getData('sourceId');
-    const expectedType = zone.dataset.type;
-
-    if (type === expectedType) {
-      const sourceElement = document.getElementById(sourceId);
-      const clone = sourceElement.querySelector('svg').cloneNode(true);
-      
-      // Kosongkan dan tambahkan komponen
-      zone.innerHTML = "";
-      zone.appendChild(clone);
-      zone.classList.add('filled');
-      
-      // Update state
-      state[type] = true;
-      
-      // Update status sirkuit
-      updateCircuitStatus();
-      
-      // Reset tampilan karena komponen baru ditambahkan
-      resetDisplay();
-      
-      // Tidak menampilkan toast sukses
-    } 
-    // Tidak menampilkan toast error
-  });
-});
-
-// Event listener untuk tombol generate/simulate (HANYA di sini perhitungan dilakukan)
 btnGenerate.addEventListener('click', () => {
-  // Tambahkan efek visual pada tombol
   btnGenerate.classList.add('clicked');
-  setTimeout(() => {
-    btnGenerate.classList.remove('clicked');
-  }, 300);
-  
-  // Jalankan perhitungan
+  setTimeout(() => btnGenerate.classList.remove('clicked'), 300);
   calculateAndDisplay();
 });
 
-// Inisialisasi
 document.addEventListener('DOMContentLoaded', () => {
-  // Reset tampilan awal
   resetDisplay();
-  
-  // Cek jika komponen sudah ada di drop zone (untuk reload halaman)
-  dropZones.forEach(zone => {
-    if (zone.querySelector('svg')) {
-      const type = zone.dataset.type;
-      state[type] = true;
-    }
-  });
-  
   updateCircuitStatus();
 });
